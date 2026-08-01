@@ -84,7 +84,8 @@ class LLMClient:
         req = urllib.request.Request(url, data=data, headers=headers)
         
         try:
-            with urllib.request.urlopen(req, timeout=15) as response:
+            # Increased timeout to 90s to accommodate GPU inference time over remote ngrok tunnel
+            with urllib.request.urlopen(req, timeout=90) as response:
                 if response.status == 200:
                     result = json.loads(response.read().decode("utf-8"))
                     choices = result.get("choices", [])
@@ -120,7 +121,7 @@ class LLMClient:
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=headers)
         try:
-            with urllib.request.urlopen(req, timeout=15) as response:
+            with urllib.request.urlopen(req, timeout=90) as response:
                 if response.status == 200:
                     result = json.loads(response.read().decode("utf-8"))
                     res = result.get("response", "").strip()
