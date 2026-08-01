@@ -30,7 +30,7 @@ def test_question(question_text: str, question_id: int = 1, server_url: str = No
     indexer = FinancialTableIndexer(json_tables_path="all_financial_tables.json")
     indexer.build_index()
 
-    llm_client = LLMClient()
+    llm_client = LLMClient(base_url=server_url)
     stage1_parser = Stage1QueryParser(stock_csv_path="ViFinQA/code_stock.csv", llm_client=llm_client)
     retriever = FinancialRetriever(indexer=indexer, output_data_dir="output/data")
     stage2_generator = Stage2PandasGenerator(llm_client=llm_client)

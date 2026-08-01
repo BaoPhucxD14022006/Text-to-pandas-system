@@ -21,13 +21,13 @@ class LLMClient:
 
     def __init__(
         self,
-        base_url: str = os.getenv("LLM_BASE_URL", "http://localhost:11434"),
-        api_key: Optional[str] = os.getenv("LLM_API_KEY", None),
-        use_hf_direct: bool = os.getenv("USE_HF_DIRECT", "0") == "1"
+        base_url: str = None,
+        api_key: Optional[str] = None,
+        use_hf_direct: bool = None
     ):
-        self.base_url = base_url.rstrip("/")
-        self.api_key = api_key
-        self.use_hf_direct = use_hf_direct
+        self.base_url = (base_url or os.getenv("LLM_BASE_URL", "http://localhost:11434")).rstrip("/")
+        self.api_key = api_key or os.getenv("LLM_API_KEY", None)
+        self.use_hf_direct = (use_hf_direct if use_hf_direct is not None else (os.getenv("USE_HF_DIRECT", "0") == "1"))
         self.hf_pipelines = {}
 
     def generate(self, model_name: str, system_prompt: str, user_prompt: str, temperature: float = 0.0) -> str:
@@ -50,11 +50,10 @@ class LLMClient:
         if res:
             return res
 
-        # 4. Fallback: offline empty response signaling dry-run heuristics
+        print(f"  [LLM FALLBACK]: Server inactive or non-responsive for model '{model_name}'. Using Heuristic Engine.")
         return ""
 
     def _call_openai_compatible(self, model_name: str, system_prompt: str, user_prompt: str, temperature: float) -> Optional[str]:
-        # Formulate full chat completions URL
         url = self.base_url
         if not url.startswith("http"):
             url = f"http://{url}"
@@ -67,7 +66,7 @@ class LLMClient:
 
         headers = {
             "Content-Type": "application/json",
-            "ngrok-skip-browser-warning": "true",  # Essential for ngrok free tunnels
+            "ngrok-skip-browser-warning": "true",
             "User-Agent": "TextToPandasClient/1.0"
         }
         if self.api_key:
@@ -83,6 +82,7 @@ class LLMClient:
         }
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers=headers)
+        
         try:
             with urllib.request.urlopen(req, timeout=15) as response:
                 if response.status == 200:
@@ -91,11 +91,15 @@ class LLMClient:
                     if choices:
                         content = choices[0].get("message", {}).get("content", "").strip()
                         if content:
-                            print(f"  [LLM SERVER RESPONSE ({model_name})]: Received successfully!")
+                            print(f"  [LLM SERVER SUCCESS ({model_name})]: Response received from {url}!")
                             return content
+        except urllib.error.HTTPError as e:
+            print(f"  [LLM SERVER HTTP ERROR]: {url} returned HTTP {e.code}: {e.reason}")
+        except urllib.error.URLError as e:
+            print(f"  [LLM SERVER CONNECTION ERROR]: Could not connect to {url}: {e.reason}")
         except Exception as e:
-            # Silence connection errors to allow clean fallback if server is offline
-            pass
+            print(f"  [LLM SERVER ERROR]: {url} -> {e}")
+            
         return None
 
     def _call_ollama(self, model_name: str, system_prompt: str, user_prompt: str, temperature: float) -> Optional[str]:
@@ -121,7 +125,7 @@ class LLMClient:
                     result = json.loads(response.read().decode("utf-8"))
                     res = result.get("response", "").strip()
                     if res:
-                        print(f"  [OLLAMA SERVER RESPONSE ({model_name})]: Received successfully!")
+                        print(f"  [OLLAMA SERVER SUCCESS ({model_name})]: Response received!")
                         return res
         except Exception:
             pass
