@@ -14,7 +14,7 @@ except ImportError:
 
 class LLMClient:
     """
-    LLM Client supporting local Ollama / vLLM / OpenAI-compatible endpoint,
+    LLM Client supporting local/remote Ollama / vLLM / OpenAI-compatible endpoints (including ngrok),
     direct HuggingFace pipeline execution on GPU (Kaggle/Colab),
     and rule-based fallbacks for offline execution.
     """
@@ -34,25 +34,98 @@ class LLMClient:
         """
         Generates completion using API endpoint, direct HF pipeline, or fallback.
         """
-        # 1. Direct HuggingFace Pipeline (ideal for Kaggle / Colab GPU)
+        # 1. Direct HuggingFace Pipeline (for Kaggle / Colab local GPU process)
         if self.use_hf_direct:
             hf_res = self._call_hf_direct(model_name, system_prompt, user_prompt, temperature)
             if hf_res:
                 return hf_res
 
-        # 2. Try OpenAI-compatible API if port 8000/v1 or configured
-        if "/v1" in self.base_url or "8000" in self.base_url:
-            res = self._call_openai_compatible(model_name, system_prompt, user_prompt, temperature)
-            if res:
-                return res
+        # 2. Try OpenAI-compatible API (FastAPI / vLLM / LMStudio / ngrok)
+        res = self._call_openai_compatible(model_name, system_prompt, user_prompt, temperature)
+        if res:
+            return res
 
-        # 3. Try Ollama API (port 11434)
+        # 3. Try Ollama API (/api/generate)
         res = self._call_ollama(model_name, system_prompt, user_prompt, temperature)
         if res:
             return res
 
         # 4. Fallback: offline empty response signaling dry-run heuristics
         return ""
+
+    def _call_openai_compatible(self, model_name: str, system_prompt: str, user_prompt: str, temperature: float) -> Optional[str]:
+        # Formulate full chat completions URL
+        url = self.base_url
+        if not url.startswith("http"):
+            url = f"http://{url}"
+
+        if not url.endswith("/chat/completions"):
+            if url.endswith("/v1"):
+                url = f"{url}/chat/completions"
+            else:
+                url = f"{url}/v1/chat/completions"
+
+        headers = {
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true",  # Essential for ngrok free tunnels
+            "User-Agent": "TextToPandasClient/1.0"
+        }
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        payload = {
+            "model": model_name,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            "temperature": temperature
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as response:
+                if response.status == 200:
+                    result = json.loads(response.read().decode("utf-8"))
+                    choices = result.get("choices", [])
+                    if choices:
+                        content = choices[0].get("message", {}).get("content", "").strip()
+                        if content:
+                            print(f"  [LLM SERVER RESPONSE ({model_name})]: Received successfully!")
+                            return content
+        except Exception as e:
+            # Silence connection errors to allow clean fallback if server is offline
+            pass
+        return None
+
+    def _call_ollama(self, model_name: str, system_prompt: str, user_prompt: str, temperature: float) -> Optional[str]:
+        url = f"{self.base_url}/api/generate"
+        if not url.startswith("http"):
+            url = f"http://{url}"
+
+        headers = {
+            "Content-Type": "application/json",
+            "ngrok-skip-browser-warning": "true"
+        }
+        payload = {
+            "model": model_name,
+            "prompt": f"{system_prompt}\n\n{user_prompt}",
+            "stream": False,
+            "options": {"temperature": temperature}
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=15) as response:
+                if response.status == 200:
+                    result = json.loads(response.read().decode("utf-8"))
+                    res = result.get("response", "").strip()
+                    if res:
+                        print(f"  [OLLAMA SERVER RESPONSE ({model_name})]: Received successfully!")
+                        return res
+        except Exception:
+            pass
+        return None
 
     def _call_hf_direct(self, model_name: str, system_prompt: str, user_prompt: str, temperature: float) -> Optional[str]:
         try:
@@ -94,50 +167,3 @@ class LLMClient:
         except Exception:
             pass
         return None
-
-    def _call_ollama(self, model_name: str, system_prompt: str, user_prompt: str, temperature: float) -> Optional[str]:
-        url = f"{self.base_url}/api/generate"
-        payload = {
-            "model": model_name,
-            "prompt": f"{system_prompt}\n\n{user_prompt}",
-            "stream": False,
-            "options": {"temperature": temperature}
-        }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        try:
-            with urllib.request.urlopen(req, timeout=5) as response:
-                if response.status == 200:
-                    result = json.loads(response.read().decode("utf-8"))
-                    return result.get("response", "").strip()
-        except Exception:
-            return None
-
-    def _call_openai_compatible(self, model_name: str, system_prompt: str, user_prompt: str, temperature: float) -> Optional[str]:
-        url = f"{self.base_url}/chat/completions"
-        if not url.startswith("http"):
-            url = f"http://{url}"
-        
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers["Authorization"] = f"Bearer {self.api_key}"
-
-        payload = {
-            "model": model_name,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            "temperature": temperature
-        }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers=headers)
-        try:
-            with urllib.request.urlopen(req, timeout=5) as response:
-                if response.status == 200:
-                    result = json.loads(response.read().decode("utf-8"))
-                    choices = result.get("choices", [])
-                    if choices:
-                        return choices[0].get("message", {}).get("content", "").strip()
-        except Exception:
-            return None
