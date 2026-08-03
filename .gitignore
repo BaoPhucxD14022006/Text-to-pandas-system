@@ -12,7 +12,7 @@ env/
 .ipynb_checkpoints/
 
 # Large files & Data (Tránh lỗi giới hạn 100MB của GitHub)
-all_financial_tables.json
+all_tables_structured.json
 data/
 ViFinQA/
 
@@ -24,3 +24,4 @@ require/
 
 # API keys & environment secrets
 .env
+.json
