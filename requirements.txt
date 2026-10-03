@@ -1,0 +1,20 @@
+# ==============================================================================
+# Requirements for ViFinQA - Text-to-Pandas Financial QA Pipeline
+# AI Guru Contest
+# ==============================================================================
+
+# Core Data Processing & Tabular Data
+pandas>=2.0.0
+numpy>=1.24.0
+beautifulsoup4>=4.12.0
+
+# Information Retrieval & Ranking
+rank-bm25>=0.2.2
+
+# Optional: Deep Learning & LLM-based Query Generation
+# Note: For GPU support, install torch matching your CUDA version:
+#   CUDA 12.1: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+#   CUDA 11.8: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+#   CPU-only:  pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+transformers>=4.40.0
+accelerate>=0.28.0

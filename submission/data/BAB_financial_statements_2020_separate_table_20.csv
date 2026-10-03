@@ -1,0 +1,32 @@
+﻿Col_1,Tổng giá trị ghi sổ kế toán (theo tỷ giá tại ngày lập báo cáo),Tổng giá trị ghi sổ kế toán (theo tỷ giá tại ngày lập báo cáo)_1
+,Tài sản,Công nợ
+,Triệu VND,Triệu VND
+Tại ngày 31/12/2020,9.739,-
+Công cụ tài chính phải sinh tiền tệ,9.739,-
+- Giao dịch hoán đổi tiền tệ,9.739,-
+Tại ngày 31/12/2019,27.641,-
+Công cụ tài chính phải sinh tiền tệ,27.641,-
+- Giao dịch hoán đổi tiền tệ,27.641,-
+[Cho vay khách hàng],,
+,31/12/2020,31/12/2019
+,Triệu VND,Triệu VND
+"Cho vay các tổ chức kinh tế, cá nhân trong nước",79.438.294,72.930.750
+"Cho vay bằng vốn tài trợ, ủy thác đầu tư",500,500
+Cho vay theo chỉ định của Chính phủ,1.629,2.062
+,79.440.423,72.933.312
+[Phân tích chất lượng nợ cho vay],,
+,31/12/2020,31/12/2019
+,Triệu VND,Triệu VND
+Nợ đủ tiêu chuẩn,78.768.014,72.385.261
+Nợ cần chú ý,44.409,48.025
+Nợ dưới tiêu chuẩn,23.123,264.743
+Nợ nghi ngờ,271.073,17.576
+Nợ có khả năng mất vốn,333.804,217.707
+,79.440.423,72.933.312
+[Phân tích dư nợ theo thời gian],,
+,31/12/2020,31/12/2019
+,Triệu VND,Triệu VND
+Nợ ngắn hạn,35.650.639,31.383.290
+Nợ trung hạn,14.393.929,13.876.855
+Nợ dài hạn,29.395.855,27.673.167
+,79.440.423,72.933.312
