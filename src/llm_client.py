@@ -14,43 +14,60 @@ except ImportError:
 
 class LLMClient:
     """
-    LLM Client supporting local/remote Ollama / vLLM / OpenAI-compatible endpoints (including ngrok),
-    direct HuggingFace pipeline execution on GPU (Kaggle/Colab),
-    and rule-based fallbacks for offline execution.
+    Local/Remote LLM Client supporting:
+    - Silent offline local execution with fast heuristic fallback
+    - Local Ollama / vLLM / LMStudio / OpenAI-compatible API
+    - Direct HuggingFace pipeline execution if GPU is available
     """
 
     def __init__(
         self,
-        base_url: str = None,
+        base_url: Optional[str] = None,
         api_key: Optional[str] = None,
-        use_hf_direct: bool = None
+        use_hf_direct: bool = False,
+        enabled: Optional[bool] = None
     ):
-        self.base_url = (base_url or os.getenv("LLM_BASE_URL", "http://localhost:11434")).rstrip("/")
+        self.base_url = (base_url or os.getenv("LLM_BASE_URL", "")).rstrip("/")
         self.api_key = api_key or os.getenv("LLM_API_KEY", None)
-        self.use_hf_direct = (use_hf_direct if use_hf_direct is not None else (os.getenv("USE_HF_DIRECT", "0") == "1"))
+        self.use_hf_direct = use_hf_direct or (os.getenv("USE_HF_DIRECT", "0") == "1")
+        
+        # If enabled is not explicitly set, enable if base_url is explicitly given or env var is set
+        if enabled is not None:
+            self.enabled = enabled
+        else:
+            self.enabled = bool(self.base_url) or self.use_hf_direct or (os.getenv("ENABLE_LLM", "0") == "1")
+
         self.hf_pipelines = {}
+        self._warned_offline = False
 
     def generate(self, model_name: str, system_prompt: str, user_prompt: str, temperature: float = 0.0) -> str:
         """
-        Generates completion using API endpoint, direct HF pipeline, or fallback.
+        Generates completion using API endpoint, direct HF pipeline, or falls back to local heuristic.
         """
-        # 1. Direct HuggingFace Pipeline (for Kaggle / Colab local GPU process)
+        if not self.enabled:
+            return ""
+
+        # 1. Direct HuggingFace Pipeline (for local GPU execution)
         if self.use_hf_direct:
             hf_res = self._call_hf_direct(model_name, system_prompt, user_prompt, temperature)
             if hf_res:
                 return hf_res
 
-        # 2. Try OpenAI-compatible API (FastAPI / vLLM / LMStudio / ngrok)
-        res = self._call_openai_compatible(model_name, system_prompt, user_prompt, temperature)
-        if res:
-            return res
+        # 2. Try OpenAI-compatible API (FastAPI / vLLM / LMStudio / Ollama)
+        if self.base_url:
+            res = self._call_openai_compatible(model_name, system_prompt, user_prompt, temperature)
+            if res:
+                return res
 
-        # 3. Try Ollama API (/api/generate)
-        res = self._call_ollama(model_name, system_prompt, user_prompt, temperature)
-        if res:
-            return res
+            res_ollama = self._call_ollama(model_name, system_prompt, user_prompt, temperature)
+            if res_ollama:
+                return res_ollama
 
-        print(f"  [LLM FALLBACK]: Server inactive or non-responsive for model '{model_name}'. Using Heuristic Engine.")
+        if not self._warned_offline:
+            print(f"  [LLM Client] LLM server not reachable at '{self.base_url}'. Seamlessly using Local Heuristic Engine.")
+            self._warned_offline = True
+            self.enabled = False
+
         return ""
 
     def _call_openai_compatible(self, model_name: str, system_prompt: str, user_prompt: str, temperature: float) -> Optional[str]:
@@ -58,17 +75,8 @@ class LLMClient:
         if not url.startswith("http"):
             url = f"http://{url}"
 
-        if not url.endswith("/chat/completions"):
-            if url.endswith("/v1"):
-                url = f"{url}/chat/completions"
-            else:
-                url = f"{url}/v1/chat/completions"
-
-        headers = {
-            "Content-Type": "application/json",
-            "ngrok-skip-browser-warning": "true",
-            "User-Agent": "TextToPandasClient/1.0"
-        }
+        endpoint = f"{url}/v1/chat/completions"
+        headers = {"Content-Type": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
@@ -80,78 +88,73 @@ class LLMClient:
             ],
             "temperature": temperature
         }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers=headers)
-        
+
         try:
-            # Increased timeout to 90s to accommodate GPU inference time over remote ngrok tunnel
-            with urllib.request.urlopen(req, timeout=90) as response:
+            req = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=15) as response:
                 if response.status == 200:
-                    result = json.loads(response.read().decode("utf-8"))
-                    choices = result.get("choices", [])
+                    resp_json = json.loads(response.read().decode("utf-8"))
+                    choices = resp_json.get("choices", [])
                     if choices:
-                        content = choices[0].get("message", {}).get("content", "").strip()
-                        if content:
-                            print(f"  [LLM SERVER SUCCESS ({model_name})]: Response received from {url}!")
-                            return content
-        except urllib.error.HTTPError as e:
-            print(f"  [LLM SERVER HTTP ERROR]: {url} returned HTTP {e.code}: {e.reason}")
-        except urllib.error.URLError as e:
-            print(f"  [LLM SERVER CONNECTION ERROR]: Could not connect to {url}: {e.reason}")
-        except Exception as e:
-            print(f"  [LLM SERVER ERROR]: {url} -> {e}")
-            
+                        return choices[0].get("message", {}).get("content", "").strip()
+        except Exception:
+            pass
         return None
 
     def _call_ollama(self, model_name: str, system_prompt: str, user_prompt: str, temperature: float) -> Optional[str]:
-        url = f"{self.base_url}/api/generate"
+        url = self.base_url
         if not url.startswith("http"):
             url = f"http://{url}"
 
-        headers = {
-            "Content-Type": "application/json",
-            "ngrok-skip-browser-warning": "true"
-        }
+        endpoint = f"{url}/api/generate"
+        headers = {"Content-Type": "application/json"}
+
+        prompt = f"System: {system_prompt}\nUser: {user_prompt}\nAssistant:"
         payload = {
             "model": model_name,
-            "prompt": f"{system_prompt}\n\n{user_prompt}",
+            "prompt": prompt,
             "stream": False,
             "options": {"temperature": temperature}
         }
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers=headers)
+
         try:
-            with urllib.request.urlopen(req, timeout=90) as response:
+            req = urllib.request.Request(
+                endpoint,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=15) as response:
                 if response.status == 200:
-                    result = json.loads(response.read().decode("utf-8"))
-                    res = result.get("response", "").strip()
-                    if res:
-                        print(f"  [OLLAMA SERVER SUCCESS ({model_name})]: Response received!")
-                        return res
+                    resp_json = json.loads(response.read().decode("utf-8"))
+                    return resp_json.get("response", "").strip()
         except Exception:
             pass
         return None
 
     def _call_hf_direct(self, model_name: str, system_prompt: str, user_prompt: str, temperature: float) -> Optional[str]:
-        try:
-            import torch
-            from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
-        except ImportError:
-            return None
-
         if model_name not in self.hf_pipelines:
             try:
-                print(f"Loading HuggingFace model directly on GPU: {model_name}...")
+                import torch
+                from transformers import pipeline, AutoModelForCausalLM, AutoTokenizer
+                print(f"Loading local HuggingFace pipeline for {model_name}...")
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                dtype = torch.float16 if device == "cuda" else torch.float32
                 tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
                 model = AutoModelForCausalLM.from_pretrained(
                     model_name,
-                    device_map="auto",
-                    torch_dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                    torch_dtype=dtype,
+                    device_map="auto" if device == "cuda" else None,
                     trust_remote_code=True
                 )
                 self.hf_pipelines[model_name] = pipeline("text-generation", model=model, tokenizer=tokenizer)
             except Exception as e:
-                print(f"Error loading HF model {model_name}: {e}")
+                print(f"Failed to load HF model {model_name}: {e}")
                 return None
 
         pipe = self.hf_pipelines.get(model_name)
@@ -164,11 +167,9 @@ class LLMClient:
         ]
         try:
             out = pipe(messages, max_new_tokens=512, do_sample=(temperature > 0))
-            generated = out[0]["generated_text"]
-            if isinstance(generated, list):
-                return generated[-1].get("content", "").strip()
-            elif isinstance(generated, str):
-                return generated.strip()
+            gen = out[0]["generated_text"]
+            if isinstance(gen, list):
+                return gen[-1].get("content", "").strip()
+            return str(gen).strip()
         except Exception:
-            pass
-        return None
+            return None

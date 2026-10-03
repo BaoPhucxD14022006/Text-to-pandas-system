@@ -27,3 +27,31 @@ Thumbs.db
 # data ViFinQA
 ViFinQA
 processed_data
+submission 
+# Virtual Environment
+.venv/
+venv/
+env/
+
+# Python cache files
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Large files & Data (Tránh lỗi giới hạn 100MB của GitHub)
+all_tables_structured.json
+data/
+ViFinQA/
+
+# Output & benchmark temporary folders
+output/
+benchmark/
+require/
+*.zip
+
+# API keys & environment secrets
+.env
+.json

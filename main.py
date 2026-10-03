@@ -10,8 +10,6 @@ from src.stage1_v2equery import Stage1QueryParser
 from src.retriever import FinancialRetriever
 from src.stage2_t2pandas import Stage2PandasGenerator
 from src.submission_builder import SubmissionBuilder
-from benchmark.evaluator import SystemBenchmarkEvaluator
-
 
 def load_questions(questions_path: str) -> List[Dict[str, Any]]:
     questions = []
@@ -32,11 +30,13 @@ def load_questions(questions_path: str) -> List[Dict[str, Any]]:
 
 def run_pipeline(
     questions_path: str = "ViFinQA/questions/questions.jsonl",
-    tables_path: str = "all_financial_tables.json",
+    tables_path: str = "processed_data/table_catalog.json",
+    csv_dir: str = "processed_data/csv",
     stock_csv_path: str = "ViFinQA/code_stock.csv",
-    output_dir: str = "output",
+    output_dir: str = "submission",
     zip_path: str = "submission.zip",
-    limit: int = 0
+    limit: int = 0,
+    server_url: str = None
 ):
     print("=== STARTING VIFINQA TEXT-TO-PANDAS PIPELINE ===")
 
@@ -50,9 +50,13 @@ def run_pipeline(
     indexer = FinancialTableIndexer(json_tables_path=tables_path)
     indexer.build_index()
 
-    llm_client = LLMClient()
+    llm_client = LLMClient(base_url=server_url, enabled=bool(server_url))
     stage1_parser = Stage1QueryParser(stock_csv_path=stock_csv_path, llm_client=llm_client)
-    retriever = FinancialRetriever(indexer=indexer, output_data_dir=os.path.join(output_dir, "data"))
+    retriever = FinancialRetriever(
+        indexer=indexer,
+        csv_dir=csv_dir,
+        output_data_dir=os.path.join(output_dir, "data")
+    )
     stage2_generator = Stage2PandasGenerator(llm_client=llm_client)
 
     predictions = []
@@ -94,28 +98,32 @@ def run_pipeline(
     builder = SubmissionBuilder(output_dir=output_dir)
     builder.build_submission(predictions, zip_filepath=zip_path)
 
-    # 5. Evaluate if Ground Truth is present in input questions
-    has_ground_truth = any("answer" in q or "relevant_tables" in q for q in questions)
-    if has_ground_truth:
-        evaluator = SystemBenchmarkEvaluator()
-        evaluator.evaluate(predictions, questions)
-
     print("=== PIPELINE COMPLETED SUCCESSFULLY ===")
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="ViFinQA 2-Stage Text-to-Pandas Pipeline")
+def main():
+    parser = argparse.ArgumentParser(description="ViFinQA 2-Stage Text-to-Pandas Local Pipeline")
     parser.add_argument("--questions", type=str, default="ViFinQA/questions/questions.jsonl", help="Path to questions JSONL")
-    parser.add_argument("--tables", type=str, default="all_financial_tables.json", help="Path to extracted tables JSON")
-    parser.add_argument("--output-dir", type=str, default="output", help="Output directory")
+    parser.add_argument("--tables", type=str, default="processed_data/table_catalog.json", help="Path to table catalog JSON")
+    parser.add_argument("--csv-dir", type=str, default="processed_data/csv", help="Path to table CSVs directory")
+    parser.add_argument("--stock-csv", type=str, default="ViFinQA/code_stock.csv", help="Path to stock codes CSV")
+    parser.add_argument("--output-dir", type=str, default="submission", help="Output directory")
     parser.add_argument("--zip-output", type=str, default="submission.zip", help="Path to submission.zip")
     parser.add_argument("--limit", type=int, default=0, help="Limit number of questions to process (0 = all)")
+    parser.add_argument("--server-url", type=str, default=None, help="Optional remote/local LLM server URL (e.g. Ollama or vLLM)")
 
     args = parser.parse_args()
     run_pipeline(
         questions_path=args.questions,
         tables_path=args.tables,
+        csv_dir=args.csv_dir,
+        stock_csv_path=args.stock_csv,
         output_dir=args.output_dir,
         zip_path=args.zip_output,
-        limit=args.limit
+        limit=args.limit,
+        server_url=args.server_url
     )
+
+
+if __name__ == "__main__":
+    main()
